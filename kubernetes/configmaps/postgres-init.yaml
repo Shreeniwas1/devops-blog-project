@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-config
+data:
+  init.sql: |
+    -- Create the blog database if it doesn't exist
+    CREATE DATABASE IF NOT EXISTS blogdb;
+    
+    -- Grant all privileges to the blog user
+    GRANT ALL PRIVILEGES ON DATABASE blogdb TO bloguser;
+    
+    -- Connect to the blog database
+    \c blogdb;
+    
+    -- Create posts table
+    CREATE TABLE IF NOT EXISTS posts (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        content TEXT NOT NULL,
+        excerpt TEXT,
+        tags VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Create indexes for better performance
+    CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_posts_tags ON posts USING GIN (to_tsvector('english', tags));
+    
+    -- Grant permissions on the table
+    GRANT ALL PRIVILEGES ON TABLE posts TO bloguser;
+    GRANT USAGE, SELECT ON SEQUENCE posts_id_seq TO bloguser;
