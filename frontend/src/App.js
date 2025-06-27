@@ -97,11 +97,14 @@ function App() {
     try {
       const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3001';
       const response = await axios.get(`${apiUrl}/api/posts`);
-      setPosts(response.data);
+      console.log('API Response:', response.data); // Debug log
+      const postsData = response.data.posts || [];
+      setPosts(Array.isArray(postsData) ? postsData : []);
       setLoading(false);
     } catch (err) {
       console.error('Error fetching posts:', err);
       setError('Failed to load blog posts. Please try again later.');
+      setPosts([]); // Ensure posts remains an array
       setLoading(false);
     }
   };
@@ -116,7 +119,13 @@ function App() {
       {loading && <LoadingSpinner>Loading posts...</LoadingSpinner>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
       
-      {posts.map((post) => (
+      {!loading && !error && (!posts || posts.length === 0) && (
+        <div style={{ textAlign: 'center', padding: '2rem' }}>
+          <p>No blog posts available at the moment.</p>
+        </div>
+      )}
+      
+      {Array.isArray(posts) && posts.length > 0 && posts.map((post) => (
         <BlogCard key={post.id}>
           <BlogTitle>{post.title}</BlogTitle>
           <BlogMeta>
