@@ -106,6 +106,10 @@ dist/
 # Docker
 .dockerignore
 
+# Minikube binary (large file)
+minikube-linux-amd64
+minikube-*
+
 # Kubernetes secrets (never commit real secrets)
 kubernetes/secrets/prod-secrets.yaml
 
