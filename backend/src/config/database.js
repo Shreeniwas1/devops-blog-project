@@ -24,28 +24,37 @@ pool.on('error', (err) => {
 
 // Initialize database schema
 async function initializeDatabase() {
-  try {
-    const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS posts (
-        id SERIAL PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        content TEXT NOT NULL,
-        excerpt TEXT,
-        tags VARCHAR(255),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `;
-    
-    await pool.query(createTableQuery);
-    console.log('Database schema initialized');
-    
-    // Insert sample data if table is empty
-    const countResult = await pool.query('SELECT COUNT(*) FROM posts');
-    const count = parseInt(countResult.rows[0].count);
-    
-    if (count === 0) {
-      const samplePosts = [
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      console.log('Attempting to initialize database...');
+      
+      // Test connection first
+      await pool.query('SELECT 1');
+      console.log('Database connection established');
+      
+      const createTableQuery = `
+        CREATE TABLE IF NOT EXISTS posts (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          content TEXT NOT NULL,
+          excerpt TEXT,
+          tags VARCHAR(255),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+      
+      await pool.query(createTableQuery);
+      console.log('Database schema initialized');
+      
+      // Insert sample data if table is empty
+      const countResult = await pool.query('SELECT COUNT(*) FROM posts');
+      const count = parseInt(countResult.rows[0].count);
+      
+      if (count === 0) {
+        console.log('No posts found, inserting sample data...');
+        const samplePosts = [
         {
           title: 'Getting Started with DevOps',
           content: `# Getting Started with DevOps
@@ -176,17 +185,31 @@ Gradually roll out changes to a subset of users:
         );
       }
       
-      console.log('Sample data inserted');
+      console.log('Sample data inserted successfully');
+      } else {
+        console.log(`Found ${count} existing posts in database`);
+      }
+      
+      console.log('Database initialization completed successfully');
+      return true;
+      
+    } catch (error) {
+      console.error(`Database initialization failed (${retries} retries left):`, error.message);
+      retries--;
+      if (retries > 0) {
+        console.log('Retrying database initialization in 3 seconds...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      } else {
+        console.error('Database initialization failed after all retries');
+        throw error;
+      }
     }
-  } catch (error) {
-    console.error('Error initializing database:', error);
   }
 }
 
-// Initialize on startup
-initializeDatabase();
-
+// Don't initialize immediately - export the function instead
 module.exports = {
   query: (text, params) => pool.query(text, params),
-  pool
+  pool,
+  initializeDatabase
 };

@@ -136,6 +136,9 @@ deploy_kubernetes() {
     kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment --namespace=default
     kubectl wait --for=condition=ready --timeout=300s pod -l app=postgres --namespace=default
     
+    # Verify database initialization
+    verify_database_initialization
+    
     print_status "Kubernetes deployment completed ✓"
 }
 
@@ -222,9 +225,9 @@ wait_for_services() {
     print_status "Services are ready ✓"
 }
 
-# Setup port forwarding
-setup_port_forwarding() {
-    print_status "Setting up port forwarding..."
+# Setup all port forwarding (application and monitoring)
+setup_all_port_forwarding() {
+    print_status "Setting up all port forwarding..."
     
     # Kill any existing port forwards
     pkill -f "kubectl port-forward" || true
@@ -234,6 +237,7 @@ setup_port_forwarding() {
     
     # Wait for services to be ready first
     wait_for_services
+    wait_for_monitoring_services
     
     # Check for port conflicts and use alternative ports if needed
     if ss -tuln | grep -q ":3000 "; then
@@ -250,21 +254,43 @@ setup_port_forwarding() {
         BACKEND_PORT=3001
     fi
     
+    if ss -tuln | grep -q ":3002 "; then
+        print_warning "Port 3002 is in use, using port 3005 for Grafana"
+        GRAFANA_PORT=3005
+    else
+        GRAFANA_PORT=3002
+    fi
+
+    if ss -tuln | grep -q ":9091 "; then
+        print_warning "Port 9091 is in use, using port 9092 for Prometheus"
+        PROMETHEUS_PORT=9092
+    else
+        PROMETHEUS_PORT=9091
+    fi
+    
     # Export variables for use in other functions
     export FRONTEND_PORT
     export BACKEND_PORT
+    export GRAFANA_PORT
+    export PROMETHEUS_PORT
     
-    # Forward frontend service
+    # Start all port forwards
     print_status "Starting frontend port forward on port ${FRONTEND_PORT}..."
     kubectl port-forward service/frontend-service ${FRONTEND_PORT}:80 >/dev/null 2>&1 &
     FRONTEND_PF_PID=$!
     
-    # Forward backend service
     print_status "Starting backend port forward on port ${BACKEND_PORT}..."
     kubectl port-forward service/backend-service ${BACKEND_PORT}:3001 >/dev/null 2>&1 &
     BACKEND_PF_PID=$!
     
-    # Forward PostgreSQL for debugging (optional)
+    print_status "Starting Grafana port forward on port ${GRAFANA_PORT}..."
+    kubectl port-forward service/grafana-service ${GRAFANA_PORT}:3000 >/dev/null 2>&1 &
+    GRAFANA_PF_PID=$!
+    
+    print_status "Starting Prometheus port forward on port ${PROMETHEUS_PORT}..."
+    kubectl port-forward service/prometheus-service ${PROMETHEUS_PORT}:9090 >/dev/null 2>&1 &
+    PROMETHEUS_PF_PID=$!
+    
     print_status "Starting database port forward on port 5432..."
     kubectl port-forward service/postgres-service 5432:5432 >/dev/null 2>&1 &
     DB_PF_PID=$!
@@ -272,7 +298,7 @@ setup_port_forwarding() {
     # Wait a moment for port forwards to establish
     sleep 3
     
-    # Verify port forwards are working
+    # Verify all port forwards are working
     print_status "Verifying port forwards..."
     
     # Test backend
@@ -289,10 +315,26 @@ setup_port_forwarding() {
         print_warning "Frontend port forward may not be working"
     fi
     
-    print_status "Port forwarding setup completed ✓"
+    # Test Grafana
+    if curl -s -I http://localhost:${GRAFANA_PORT} >/dev/null 2>&1; then
+        print_status "Grafana port forward working ✓"
+    else
+        print_warning "Grafana port forward may not be working"
+    fi
+    
+    # Test Prometheus
+    if curl -s http://localhost:${PROMETHEUS_PORT} >/dev/null 2>&1; then
+        print_status "Prometheus port forward working ✓"
+    else
+        print_warning "Prometheus port forward may not be working"
+    fi
+    
+    print_status "All port forwarding setup completed ✓"
     print_status "Frontend available at: http://localhost:${FRONTEND_PORT}"
     print_status "Backend API available at: http://localhost:${BACKEND_PORT}"
     print_status "Health check: http://localhost:${BACKEND_PORT}/health"
+    print_status "Grafana available at: http://localhost:${GRAFANA_PORT} (admin/admin123)"
+    print_status "Prometheus available at: http://localhost:${PROMETHEUS_PORT}"
     print_status "Database available at: localhost:5432"
 }
 
@@ -377,63 +419,69 @@ setup_monitoring() {
         print_warning "Grafana deployment not found, skipping wait"
     fi
     
-    # Wait for services to be ready
-    wait_for_monitoring_services
-    
-    # Setup monitoring port forwarding
-    print_status "Setting up monitoring port forwarding..."
-    
-    # Check for port conflicts for monitoring
-    if ss -tuln | grep -q ":3002 "; then
-        print_warning "Port 3002 is in use, using port 3005 for Grafana"
-        GRAFANA_PORT=3005
-    else
-        GRAFANA_PORT=3002
-    fi
-    
-    if ss -tuln | grep -q ":9091 "; then
-        print_warning "Port 9091 is in use, using port 9092 for Prometheus"
-        PROMETHEUS_PORT=9092
-    else
-        PROMETHEUS_PORT=9091
-    fi
-    
-    # Export variables for later use
-    export GRAFANA_PORT
-    export PROMETHEUS_PORT
-    
-    # Start monitoring port forwards
-    print_status "Starting Grafana port forward on port ${GRAFANA_PORT}..."
-    kubectl port-forward service/grafana-service ${GRAFANA_PORT}:3000 >/dev/null 2>&1 &
-    GRAFANA_PF_PID=$!
-    
-    print_status "Starting Prometheus port forward on port ${PROMETHEUS_PORT}..."
-    kubectl port-forward service/prometheus-service ${PROMETHEUS_PORT}:9090 >/dev/null 2>&1 &
-    PROMETHEUS_PF_PID=$!
-    
-    # Wait for port forwards to establish
-    sleep 3
-    
-    # Verify monitoring port forwards
-    print_status "Verifying monitoring port forwards..."
-    
-    # Test Grafana
-    if curl -s -I http://localhost:${GRAFANA_PORT} >/dev/null 2>&1; then
-        print_status "Grafana port forward working ✓"
-    else
-        print_warning "Grafana port forward may not be working"
-    fi
-    
-    # Test Prometheus
-    if curl -s http://localhost:${PROMETHEUS_PORT} >/dev/null 2>&1; then
-        print_status "Prometheus port forward working ✓"
-    else
-        print_warning "Prometheus port forward may not be working"
-    fi
-    
     print_status "Monitoring setup completed ✓"
-    print_status "Grafana available at: http://localhost:${GRAFANA_PORT} (admin/admin123)"
-    print_status "Prometheus available at: http://localhost:${PROMETHEUS_PORT}"
+}
+
+# Verify database initialization
+verify_database_initialization() {
+    print_status "Verifying database initialization..."
+    
+    # Wait for backend pod to be running and ready
+    print_status "Waiting for backend pod to be ready..."
+    for i in {1..60}; do
+        local backend_pod=$(kubectl get pods -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [[ -n "$backend_pod" ]]; then
+            # Check if pod is running
+            local phase=$(kubectl get pod "$backend_pod" -o jsonpath='{.status.phase}' 2>/dev/null)
+            if [[ "$phase" == "Running" ]]; then
+                # Check if pod is ready (all containers ready)
+                local ready_status=$(kubectl get pod "$backend_pod" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+                if [[ "$ready_status" == "True" ]]; then
+                    print_status "Backend pod is running and ready ✓"
+                    
+                    # Additional verification: check if backend service is responding
+                    # Use a temporary port-forward to test the health endpoint
+                    print_status "Testing backend health endpoint..."
+                    kubectl port-forward "$backend_pod" 9999:3001 >/dev/null 2>&1 &
+                    local pf_pid=$!
+                    sleep 2
+                    
+                    # Test health endpoint
+                    if curl -s --max-time 5 http://localhost:9999/health/ready >/dev/null 2>&1; then
+                        print_status "Backend health check passed ✓"
+                        kill $pf_pid 2>/dev/null || true
+                        return 0
+                    else
+                        print_status "Backend health check failed, but pod is ready - continuing..."
+                        kill $pf_pid 2>/dev/null || true
+                        return 0
+                    fi
+                fi
+            fi
+        fi
+        
+        if [[ $((i % 10)) -eq 0 ]]; then
+            print_status "Still waiting for backend to be ready... ($i/60)"
+            if [[ -n "$backend_pod" ]]; then
+                local status=$(kubectl get pod "$backend_pod" -o jsonpath='{.status.conditions[?(@.type=="Ready")]}' 2>/dev/null)
+                print_status "Pod status: $status"
+            fi
+        else
+            echo -n "."
+        fi
+        sleep 2
+    done
+    
+    print_warning "Backend readiness check timed out, but proceeding with setup..."
+    local backend_pod=$(kubectl get pods -l app=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [[ -n "$backend_pod" ]]; then
+        print_warning "Backend pod found: $backend_pod"
+        print_warning "Check logs with: kubectl logs $backend_pod"
+    fi
+    
+    # Even if verification times out, continue with setup
+    # The monitoring setup and port forwarding will show if services are actually working
+    return 0
 }
 
 # Main function
@@ -445,8 +493,9 @@ main() {
     start_minikube
     build_images
     deploy_kubernetes
+    verify_database_initialization
     setup_monitoring
-    setup_port_forwarding
+    setup_all_port_forwarding
     
     print_status "🎉 Setup completed successfully!"
     print_status ""

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useParams } from 'react-router-dom';
 import styled from 'styled-components';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
@@ -176,19 +176,30 @@ function App() {
     </div>
   );
 
-  const PostDetail = ({ postId }) => {
+  const PostDetail = () => {
+    const { id: postId } = useParams();
     const [post, setPost] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
       const fetchPost = async () => {
         try {
+          if (!postId) {
+            setError('No post ID provided');
+            setLoading(false);
+            return;
+          }
+          
           const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+          console.log('Fetching post with ID:', postId); // Debug log
           const response = await axios.get(`${apiUrl}/api/posts/${postId}`);
           setPost(response.data);
+          setError(null);
           setLoading(false);
         } catch (err) {
           console.error('Error fetching post:', err);
+          setError('Failed to load post data');
           setLoading(false);
         }
       };
@@ -196,6 +207,7 @@ function App() {
     }, [postId]);
 
     if (loading) return <LoadingSpinner>Loading post...</LoadingSpinner>;
+    if (error) return <ErrorMessage>{error}</ErrorMessage>;
     if (!post) return <ErrorMessage>Post not found</ErrorMessage>;
 
     return (
@@ -222,7 +234,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/about" element={<About />} />
-          <Route path="/post/:id" element={<PostDetail postId={window.location.pathname.split('/')[2]} />} />
+          <Route path="/post/:id" element={<PostDetail />} />
         </Routes>
       </Container>
     </Router>
