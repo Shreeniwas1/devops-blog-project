@@ -32,10 +32,32 @@ cleanup_port_forwards() {
 cleanup_kubernetes() {
     print_status "Removing Kubernetes resources..."
     
+    # Delete monitoring resources from default namespace
+    kubectl delete deployment grafana-deployment --ignore-not-found=true
+    kubectl delete deployment prometheus-deployment --ignore-not-found=true
+    kubectl delete service grafana-service --ignore-not-found=true
+    kubectl delete service prometheus-service --ignore-not-found=true
+    kubectl delete configmap grafana-datasources --ignore-not-found=true
+    kubectl delete configmap grafana-dashboards-config --ignore-not-found=true
+    kubectl delete configmap grafana-dashboard-blog --ignore-not-found=true
+    kubectl delete configmap prometheus-config --ignore-not-found=true
+    kubectl delete clusterrole prometheus --ignore-not-found=true
+    kubectl delete clusterrolebinding prometheus --ignore-not-found=true
+    kubectl delete serviceaccount prometheus --ignore-not-found=true
+    
     # Delete blog namespace and all resources
     kubectl delete namespace blog --ignore-not-found=true
     
-    # Delete monitoring namespace if it exists
+    # Delete default namespace blog resources
+    kubectl delete deployment backend-deployment --ignore-not-found=true
+    kubectl delete deployment frontend-deployment --ignore-not-found=true
+    kubectl delete statefulset postgres-statefulset --ignore-not-found=true
+    kubectl delete service backend-service --ignore-not-found=true
+    kubectl delete service frontend-service --ignore-not-found=true
+    kubectl delete service postgres-service --ignore-not-found=true
+    kubectl delete secret app-secrets --ignore-not-found=true
+    
+    # Delete monitoring namespace if it exists (for Helm-based monitoring)
     kubectl delete namespace monitoring --ignore-not-found=true
     
     print_status "Kubernetes resources cleaned up ✓"
@@ -51,6 +73,10 @@ cleanup_docker_images() {
     # Remove blog images
     docker rmi personal-blog-frontend:latest || true
     docker rmi personal-blog-backend:latest || true
+    
+    # Remove monitoring images if they exist locally
+    docker rmi prom/prometheus:latest || true
+    docker rmi grafana/grafana:latest || true
     
     # Clean up dangling images
     docker image prune -f || true

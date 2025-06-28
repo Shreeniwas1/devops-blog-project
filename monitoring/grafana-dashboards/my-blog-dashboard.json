@@ -1,7 +1,6 @@
 {
-  "dashboard": {
-    "id": null,
-    "title": "DevOps Personal Blog Dashboard",
+  "id": null,
+  "title": "DevOps Personal Blog Dashboard",
     "tags": ["devops", "blog", "kubernetes"],
     "style": "dark",
     "timezone": "browser",
@@ -207,5 +206,4 @@
       "to": "now"
     },
     "refresh": "5s"
-  }
 }

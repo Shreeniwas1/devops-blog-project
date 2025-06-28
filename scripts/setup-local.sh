@@ -110,24 +110,116 @@ deploy_kubernetes() {
     
     # Apply configurations in order
     print_status "Applying secrets..."
-    kubectl apply -f kubernetes/secrets/ -n blog
+    kubectl apply -f kubernetes/secrets/ || true
     
     print_status "Applying configmaps..."
-    kubectl apply -f kubernetes/configmaps/ -n blog
+    kubectl apply -f kubernetes/configmaps/ || true
     
     print_status "Applying deployments..."
-    kubectl apply -f kubernetes/deployments/ -n blog
+    kubectl apply -f kubernetes/deployments/
     
-    print_status "Applying ingress..."
-    kubectl apply -f kubernetes/ingress/ -n blog
+    # Apply services
+    print_status "Applying services..."
+    kubectl apply -f kubernetes/backend-service.yaml
+    kubectl apply -f kubernetes/frontend-service.yaml
+    kubectl apply -f kubernetes/postgres-service.yaml
+    
+    # Apply ingress if it exists
+    if [ -d "kubernetes/ingress" ]; then
+        print_status "Applying ingress..."
+        kubectl apply -f kubernetes/ingress/ || true
+    fi
     
     # Wait for deployments to be ready
     print_status "Waiting for deployments to be ready..."
-    kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n blog
-    kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n blog
-    kubectl wait --for=condition=ready --timeout=300s pod -l app=postgres -n blog
+    kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment --namespace=default
+    kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment --namespace=default
+    kubectl wait --for=condition=ready --timeout=300s pod -l app=postgres --namespace=default
     
     print_status "Kubernetes deployment completed ✓"
+}
+
+# Check and create monitoring manifests if they don't exist
+check_monitoring_manifests() {
+    print_status "Checking monitoring manifests..."
+    
+    # Create monitoring directory if it doesn't exist
+    mkdir -p kubernetes/configmaps
+    mkdir -p kubernetes/deployments
+    
+    # Check if Prometheus config exists
+    if [ ! -f "kubernetes/configmaps/prometheus-config.yaml" ]; then
+        print_warning "Prometheus config not found. Creating basic configuration..."
+        # This will be handled by the deployment step
+    fi
+    
+    # Check if Grafana config exists
+    if [ ! -f "kubernetes/configmaps/grafana-config.yaml" ]; then
+        print_warning "Grafana config not found. Creating basic configuration..."
+        # This will be handled by the deployment step
+    fi
+    
+    # Check if monitoring deployments exist
+    if [ ! -f "kubernetes/deployments/prometheus-deployment.yaml" ]; then
+        print_warning "Prometheus deployment not found. It should be created manually."
+    fi
+    
+    if [ ! -f "kubernetes/deployments/grafana-deployment.yaml" ]; then
+        print_warning "Grafana deployment not found. It should be created manually."
+    fi
+    
+    print_status "Monitoring manifests check completed ✓"
+}
+
+# Clean up any existing port forwards and conflicting processes
+cleanup_existing_processes() {
+    print_status "Cleaning up existing processes..."
+    
+    # Kill any existing kubectl port-forward processes
+    pkill -f "kubectl port-forward" || true
+    
+    # Check for local Grafana process and offer to stop it
+    if pgrep -f "grafana" > /dev/null; then
+        print_warning "Local Grafana process detected on port 3000"
+        read -p "Do you want to stop the local Grafana process? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            pkill -f "grafana" || true
+            print_status "Local Grafana process stopped"
+        else
+            print_status "Will use alternative ports to avoid conflicts"
+        fi
+    fi
+    
+    # Wait a moment for processes to stop
+    sleep 2
+    
+    print_status "Process cleanup completed ✓"
+}
+
+# Wait for services to be ready
+wait_for_services() {
+    print_status "Waiting for services to be ready..."
+    
+    # Wait for backend service to be healthy
+    print_status "Waiting for backend service..."
+    for i in {1..30}; do
+        if kubectl get service backend-service &>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+    
+    # Wait for frontend service
+    print_status "Waiting for frontend service..."
+    for i in {1..30}; do
+        if kubectl get service frontend-service &>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+    
+    print_status "Services are ready ✓"
 }
 
 # Setup port forwarding
@@ -137,47 +229,211 @@ setup_port_forwarding() {
     # Kill any existing port forwards
     pkill -f "kubectl port-forward" || true
     
+    # Wait a moment for ports to be released
+    sleep 3
+    
+    # Wait for services to be ready first
+    wait_for_services
+    
+    # Check for port conflicts and use alternative ports if needed
+    if ss -tuln | grep -q ":3000 "; then
+        print_warning "Port 3000 is in use, using port 3003 for frontend"
+        FRONTEND_PORT=3003
+    else
+        FRONTEND_PORT=3000
+    fi
+    
+    if ss -tuln | grep -q ":3001 "; then
+        print_warning "Port 3001 is in use, using port 3004 for backend"
+        BACKEND_PORT=3004
+    else
+        BACKEND_PORT=3001
+    fi
+    
+    # Export variables for use in other functions
+    export FRONTEND_PORT
+    export BACKEND_PORT
+    
     # Forward frontend service
-    kubectl port-forward service/frontend-service 3000:80 -n blog &
+    print_status "Starting frontend port forward on port ${FRONTEND_PORT}..."
+    kubectl port-forward service/frontend-service ${FRONTEND_PORT}:80 >/dev/null 2>&1 &
+    FRONTEND_PF_PID=$!
     
     # Forward backend service
-    kubectl port-forward service/backend-service 3001:3001 -n blog &
+    print_status "Starting backend port forward on port ${BACKEND_PORT}..."
+    kubectl port-forward service/backend-service ${BACKEND_PORT}:3001 >/dev/null 2>&1 &
+    BACKEND_PF_PID=$!
     
     # Forward PostgreSQL for debugging (optional)
-    kubectl port-forward service/postgres-service 5432:5432 -n blog &
+    print_status "Starting database port forward on port 5432..."
+    kubectl port-forward service/postgres-service 5432:5432 >/dev/null 2>&1 &
+    DB_PF_PID=$!
+    
+    # Wait a moment for port forwards to establish
+    sleep 3
+    
+    # Verify port forwards are working
+    print_status "Verifying port forwards..."
+    
+    # Test backend
+    if curl -s http://localhost:${BACKEND_PORT}/health >/dev/null 2>&1; then
+        print_status "Backend port forward working ✓"
+    else
+        print_warning "Backend port forward may not be working"
+    fi
+    
+    # Test frontend
+    if curl -s -I http://localhost:${FRONTEND_PORT} >/dev/null 2>&1; then
+        print_status "Frontend port forward working ✓"
+    else
+        print_warning "Frontend port forward may not be working"
+    fi
     
     print_status "Port forwarding setup completed ✓"
-    print_status "Frontend available at: http://localhost:3000"
-    print_status "Backend API available at: http://localhost:3001"
+    print_status "Frontend available at: http://localhost:${FRONTEND_PORT}"
+    print_status "Backend API available at: http://localhost:${BACKEND_PORT}"
+    print_status "Health check: http://localhost:${BACKEND_PORT}/health"
     print_status "Database available at: localhost:5432"
+}
+
+# Wait for monitoring services to be ready
+wait_for_monitoring_services() {
+    print_status "Waiting for monitoring services to be ready..."
+    
+    # Wait for Grafana service
+    print_status "Waiting for Grafana service..."
+    for i in {1..30}; do
+        if kubectl get service grafana-service &>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+    
+    # Wait for Prometheus service
+    print_status "Waiting for Prometheus service..."
+    for i in {1..30}; do
+        if kubectl get service prometheus-service &>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+    
+    print_status "Monitoring services are ready ✓"
 }
 
 # Setup monitoring
 setup_monitoring() {
-    read -p "Do you want to set up monitoring (Prometheus/Grafana)? (y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        print_status "Setting up monitoring..."
-        
-        # Add Prometheus Helm repo
-        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-        helm repo update
-        
-        # Install Prometheus
-        helm install prometheus prometheus-community/kube-prometheus-stack \
-            --namespace monitoring \
-            --create-namespace \
-            --set grafana.adminPassword=admin123
-        
-        # Wait for Prometheus to be ready
-        kubectl wait --for=condition=ready --timeout=300s pod -l app.kubernetes.io/name=prometheus -n monitoring
-        
-        # Port forward Grafana
-        kubectl port-forward service/prometheus-grafana 3003:80 -n monitoring &
-        
-        print_status "Monitoring setup completed ✓"
-        print_status "Grafana available at: http://localhost:3003 (admin/admin123)"
+    print_status "Setting up monitoring stack (Prometheus & Grafana)..."
+    
+    check_monitoring_manifests
+    
+    # Apply Prometheus RBAC first
+    if [ -f "kubernetes/configmaps/prometheus-config.yaml" ]; then
+        kubectl apply -f kubernetes/configmaps/prometheus-config.yaml
     fi
+    
+    if [ -f "kubernetes/deployments/prometheus-deployment.yaml" ]; then
+        kubectl apply -f kubernetes/deployments/prometheus-deployment.yaml
+    fi
+    
+    if [ -f "kubernetes/prometheus-service.yaml" ]; then
+        kubectl apply -f kubernetes/prometheus-service.yaml
+    fi
+    
+    # Apply Grafana configuration
+    if [ -f "kubernetes/configmaps/grafana-config.yaml" ]; then
+        kubectl apply -f kubernetes/configmaps/grafana-config.yaml
+    fi
+    
+    # Update dashboard ConfigMap with correct format
+    if [ -f "monitoring/grafana-dashboards/my-blog-dashboard.json" ]; then
+        print_status "Updating Grafana dashboard with correct format..."
+        kubectl create configmap grafana-dashboard-blog \
+            --from-file=blog-dashboard.json=monitoring/grafana-dashboards/my-blog-dashboard.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+    fi
+    
+    if [ -f "kubernetes/deployments/grafana-deployment.yaml" ]; then
+        kubectl apply -f kubernetes/deployments/grafana-deployment.yaml
+    fi
+    
+    if [ -f "kubernetes/grafana-service.yaml" ]; then
+        kubectl apply -f kubernetes/grafana-service.yaml
+    fi
+    
+    # Wait for monitoring deployments to be ready
+    print_status "Waiting for monitoring stack to be ready..."
+    
+    # Check if deployments exist before waiting
+    if kubectl get deployment prometheus-deployment &>/dev/null; then
+        kubectl wait --for=condition=available --timeout=300s deployment/prometheus-deployment --namespace=default
+    else
+        print_warning "Prometheus deployment not found, skipping wait"
+    fi
+    
+    if kubectl get deployment grafana-deployment &>/dev/null; then
+        kubectl wait --for=condition=available --timeout=300s deployment/grafana-deployment --namespace=default
+    else
+        print_warning "Grafana deployment not found, skipping wait"
+    fi
+    
+    # Wait for services to be ready
+    wait_for_monitoring_services
+    
+    # Setup monitoring port forwarding
+    print_status "Setting up monitoring port forwarding..."
+    
+    # Check for port conflicts for monitoring
+    if ss -tuln | grep -q ":3002 "; then
+        print_warning "Port 3002 is in use, using port 3005 for Grafana"
+        GRAFANA_PORT=3005
+    else
+        GRAFANA_PORT=3002
+    fi
+    
+    if ss -tuln | grep -q ":9091 "; then
+        print_warning "Port 9091 is in use, using port 9092 for Prometheus"
+        PROMETHEUS_PORT=9092
+    else
+        PROMETHEUS_PORT=9091
+    fi
+    
+    # Export variables for later use
+    export GRAFANA_PORT
+    export PROMETHEUS_PORT
+    
+    # Start monitoring port forwards
+    print_status "Starting Grafana port forward on port ${GRAFANA_PORT}..."
+    kubectl port-forward service/grafana-service ${GRAFANA_PORT}:3000 >/dev/null 2>&1 &
+    GRAFANA_PF_PID=$!
+    
+    print_status "Starting Prometheus port forward on port ${PROMETHEUS_PORT}..."
+    kubectl port-forward service/prometheus-service ${PROMETHEUS_PORT}:9090 >/dev/null 2>&1 &
+    PROMETHEUS_PF_PID=$!
+    
+    # Wait for port forwards to establish
+    sleep 3
+    
+    # Verify monitoring port forwards
+    print_status "Verifying monitoring port forwards..."
+    
+    # Test Grafana
+    if curl -s -I http://localhost:${GRAFANA_PORT} >/dev/null 2>&1; then
+        print_status "Grafana port forward working ✓"
+    else
+        print_warning "Grafana port forward may not be working"
+    fi
+    
+    # Test Prometheus
+    if curl -s http://localhost:${PROMETHEUS_PORT} >/dev/null 2>&1; then
+        print_status "Prometheus port forward working ✓"
+    else
+        print_warning "Prometheus port forward may not be working"
+    fi
+    
+    print_status "Monitoring setup completed ✓"
+    print_status "Grafana available at: http://localhost:${GRAFANA_PORT} (admin/admin123)"
+    print_status "Prometheus available at: http://localhost:${PROMETHEUS_PORT}"
 }
 
 # Main function
@@ -185,26 +441,36 @@ main() {
     print_status "Starting DevOps Personal Blog local setup..."
     
     check_prerequisites
+    cleanup_existing_processes
     start_minikube
     build_images
     deploy_kubernetes
-    setup_port_forwarding
     setup_monitoring
+    setup_port_forwarding
     
     print_status "🎉 Setup completed successfully!"
     print_status ""
     print_status "Application URLs:"
-    print_status "  Frontend: http://localhost:3000"
-    print_status "  Backend API: http://localhost:3001"
-    print_status "  Health Check: http://localhost:3001/health"
-    print_status "  Metrics: http://localhost:3001/metrics"
+    print_status "  Frontend: http://localhost:${FRONTEND_PORT:-3000}"
+    print_status "  Backend API: http://localhost:${BACKEND_PORT:-3001}"
+    print_status "  Health Check: http://localhost:${BACKEND_PORT:-3001}/health"
+    print_status "  Metrics: http://localhost:${BACKEND_PORT:-3001}/metrics"
+    print_status ""
+    print_status "Monitoring URLs:"
+    print_status "  Grafana: http://localhost:${GRAFANA_PORT:-3002} (admin/admin123)"
+    print_status "  Prometheus: http://localhost:${PROMETHEUS_PORT:-9091}"
+    print_status ""
+    print_status "All services are automatically port-forwarded and ready to use!"
     print_status ""
     print_status "Useful commands:"
-    print_status "  kubectl get pods -n blog"
-    print_status "  kubectl logs -f deployment/backend-deployment -n blog"
-    print_status "  kubectl logs -f deployment/frontend-deployment -n blog"
+    print_status "  kubectl get pods                               # Check pod status"
+    print_status "  kubectl logs -f deployment/backend-deployment  # View backend logs"
+    print_status "  kubectl logs -f deployment/frontend-deployment # View frontend logs"
+    print_status "  kubectl logs -f deployment/grafana-deployment  # View Grafana logs"
+    print_status "  kubectl logs -f deployment/prometheus-deployment # View Prometheus logs"
+    print_status "  ps aux | grep port-forward                     # Check port forward processes"
     print_status ""
-    print_status "To stop the application, run: ./scripts/cleanup.sh"
+    print_status "To stop all services and cleanup, run: ./scripts/cleanup.sh"
 }
 
 # Run main function
