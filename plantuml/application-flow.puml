@@ -1,0 +1,105 @@
+@startuml application-flow
+title Application Data Flow - DevOps Blog
+
+!define RECTANGLE class
+skinparam backgroundColor #FAFAFA
+
+actor User
+participant "React Frontend" as frontend
+participant "Nginx" as nginx
+participant "Backend API" as backend
+participant "PostgreSQL" as db
+participant "Prometheus" as prometheus
+participant "Grafana" as grafana
+
+== User Interaction ==
+User -> nginx : HTTP Request (Port 80)
+nginx -> frontend : Serve React App
+
+== API Requests ==
+frontend -> backend : GET /api/posts
+activate backend
+backend -> db : SELECT posts
+activate db
+db -> backend : Return post data
+deactivate db
+backend -> frontend : JSON response
+deactivate backend
+
+frontend -> User : Display blog posts
+
+== Create New Post ==
+User -> frontend : Create new post
+frontend -> backend : POST /api/posts
+activate backend
+backend -> backend : Validate input
+backend -> db : INSERT new post
+activate db
+db -> backend : Confirm insertion
+deactivate db
+backend -> frontend : Success response
+deactivate backend
+frontend -> User : Show success message
+
+== Health Monitoring ==
+backend -> backend : Generate metrics
+prometheus -> backend : GET /metrics
+activate backend
+backend -> prometheus : Metrics data
+deactivate backend
+
+prometheus -> prometheus : Store metrics
+
+grafana -> prometheus : Query metrics
+activate prometheus
+prometheus -> grafana : Return metric data
+deactivate prometheus
+
+== Health Checks ==
+loop Every 30 seconds
+    note over backend : Kubernetes probes
+    backend -> db : Check connection
+    activate db
+    db -> backend : Connection status
+    deactivate db
+    
+    alt Database connected
+        backend -> backend : Return 200 OK
+    else Database error
+        backend -> backend : Return 503 Error
+    end
+end
+
+== Error Handling ==
+alt Database connection fails
+    frontend -> backend : API request
+    backend -> frontend : 503 Service Unavailable
+    frontend -> User : Show error message
+end
+
+note right of frontend
+  State Management:
+  - React hooks
+  - Error boundaries
+  - Loading states
+  - Form validation
+end note
+
+note right of backend
+  Middleware:
+  - CORS handling
+  - Rate limiting
+  - Security headers
+  - Request logging
+  - Error handling
+end note
+
+note right of db
+  Features:
+  - Connection pooling
+  - Automatic reconnection
+  - Transaction support
+  - Data validation
+end note
+
+@enduml

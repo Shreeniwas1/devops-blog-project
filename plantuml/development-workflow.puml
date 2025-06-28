@@ -1,0 +1,127 @@
+@startuml development-workflow
+title Development Workflow & Local Setup
+
+!define RECTANGLE class
+skinparam backgroundColor #FAFAFA
+
+actor Developer
+participant "Local Machine" as local
+participant "Setup Scripts" as scripts
+participant "Minikube" as minikube
+participant "Docker" as docker
+participant "Kubernetes API" as k8s_api
+
+== Initial Setup ==
+Developer -> local : Clone repository
+Developer -> scripts : Run ./scripts/setup-local.sh
+
+== Prerequisites Check ==
+scripts -> local : Check Docker installation
+scripts -> local : Check kubectl installation
+scripts -> local : Check Minikube installation
+
+alt Prerequisites missing
+    scripts -> Developer : Error: Install missing tools
+    note right of scripts
+        Setup terminated due to missing prerequisites
+    end note
+else All prerequisites installed
+    == Minikube Setup ==
+    scripts -> minikube : Start Minikube cluster
+    activate minikube
+
+    alt Minikube not running
+        scripts -> minikube : minikube start --driver=docker
+        scripts -> minikube : Enable addons (ingress, metrics-server)
+    end
+
+    == Docker Image Building ==
+    scripts -> docker : Set Minikube Docker environment
+    scripts -> docker : Build frontend image
+    activate docker
+    docker -> docker : Multi-stage build process
+    scripts -> docker : Build backend image
+    docker -> docker : Optimize for production
+    deactivate docker
+
+    == Kubernetes Deployment ==
+    scripts -> k8s_api : Apply namespace
+    scripts -> k8s_api : Apply secrets
+    scripts -> k8s_api : Apply configmaps
+    scripts -> k8s_api : Apply deployments
+    scripts -> k8s_api : Apply services
+
+    == Health Verification ==
+    loop Wait for pods to be ready
+        scripts -> k8s_api : Check pod status
+        k8s_api -> scripts : Pod status
+        alt Pods not ready
+            scripts -> scripts : Wait 5 seconds
+        end
+    end
+
+    scripts -> k8s_api : Verify database initialization
+    k8s_api -> scripts : Health check results
+
+    == Port Forwarding Setup ==
+    scripts -> scripts : Check for port conflicts
+    alt Ports in use
+        scripts -> scripts : Use alternative ports
+    end
+
+    scripts -> k8s_api : Setup port forwarding
+    note right
+      - Frontend: localhost:3000
+      - Backend: localhost:3001
+      - Grafana: localhost:3002
+      - Prometheus: localhost:9091
+      - Database: localhost:5432
+    end note
+
+    == Monitoring Deployment ==
+    scripts -> k8s_api : Deploy Prometheus
+    scripts -> k8s_api : Deploy Grafana
+    scripts -> k8s_api : Configure dashboards
+    scripts -> k8s_api : Setup metrics collection
+
+    == Final Verification ==
+    scripts -> scripts : Test all endpoints
+    scripts -> Developer : Display access URLs
+    scripts -> Developer : Setup complete!
+end
+
+== Development Cycle ==
+loop Development iterations
+    Developer -> local : Make code changes
+    Developer -> docker : Build new images
+    Developer -> k8s_api : Update deployments
+    k8s_api -> k8s_api : Rolling update
+    Developer -> local : Test changes
+end
+
+== Cleanup ==
+Developer -> scripts : Run ./scripts/cleanup.sh
+scripts -> k8s_api : Delete all resources
+scripts -> docker : Remove images
+scripts -> minikube : Stop Minikube (optional)
+deactivate minikube
+
+note right of scripts
+  Setup Features:
+  - Automatic driver detection
+  - Port conflict resolution
+  - Database readiness verification
+  - Comprehensive error handling
+  - Fallback mechanisms
+end note
+
+note right of Developer
+  Development Benefits:
+  - One-command setup
+  - Automated port forwarding
+  - Real-time monitoring
+  - Easy cleanup process
+  - Production-like environment
+end note
+
+@enduml

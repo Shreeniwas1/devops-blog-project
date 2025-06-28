@@ -1,0 +1,108 @@
+@startuml cicd-pipeline
+title Jenkins CI/CD Pipeline - DevOps Blog
+
+!define RECTANGLE class
+skinparam backgroundColor #FAFAFA
+
+start
+
+:Developer pushes code;
+:Git webhook triggers Jenkins;
+
+fork
+    :Frontend Build;
+    :Install dependencies;
+    :Run ESLint;
+    :Run unit tests;
+    :Build React app;
+fork again
+    :Backend Build;
+    :Install dependencies;
+    :Run tests;
+    :Security scan;
+    :Check code quality;
+end fork
+
+:Security Scanning;
+note right
+  - Dependency vulnerability scan
+  - SAST (Static analysis)
+  - License compliance check
+end note
+
+if (Build & Security passed?) then (yes)
+    fork
+        :Build Frontend Docker Image;
+        :Multi-stage build;
+        :Security hardening;
+        :Push to registry;
+    fork again
+        :Build Backend Docker Image;
+        :Multi-stage build;
+        :Security hardening;
+        :Push to registry;
+    end fork
+    
+    :Container Security Scan;
+    note right
+      - Trivy vulnerability scan
+      - Image layer analysis
+      - Runtime security check
+    end note
+    
+    if (Container scan passed?) then (yes)
+        :Deploy to Staging;
+        :Apply Kubernetes manifests;
+        :Wait for deployment ready;
+        :Run health checks;
+        
+        if (Staging tests passed?) then (yes)
+            :Manual Approval Gate;
+            note right
+              - Production deployment approval
+              - Change management review
+              - Rollback plan verification
+            end note
+            
+            if (Approved for production?) then (yes)
+                :Deploy to Production;
+                :Rolling update strategy;
+                :Monitor deployment;
+                :Verify health checks;
+                
+                if (Production deployment successful?) then (yes)
+                    :Send Success Notification;
+                    :Update monitoring dashboards;
+                    :Archive build artifacts;
+                    stop
+                else (no)
+                    :Automatic Rollback;
+                    :Send Failure Notification;
+                    :Investigate issues;
+                    stop
+                endif
+            else (no)
+                :Cancel Deployment;
+                :Send Cancellation Notification;
+                stop
+            endif
+        else (no)
+            :Staging Failure;
+            :Send Test Failure Notification;
+            :Generate test reports;
+            stop
+        endif
+    else (no)
+        :Container Security Failure;
+        :Send Security Alert;
+        :Block deployment;
+        stop
+    endif
+else (no)
+    :Build Failure;
+    :Send Build Failure Notification;
+    :Generate error reports;
+    stop
+endif
+
+@enduml

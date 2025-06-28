@@ -175,3 +175,106 @@ $RECYCLE.BIN/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# React build output
+frontend/build/
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Backend environment files and logs
+backend/.env
+backend/.env.local
+backend/.env.development.local
+backend/.env.test.local
+backend/.env.production.local
+backend/logs/
+backend/*.log
+
+# Docker and Container related
+.dockerignore
+docker-compose.override.yml
+.docker/
+
+# Kubernetes secrets and sensitive configs
+kubernetes/secrets/prod-secrets.yaml
+kubernetes/secrets/*-secret.yaml
+kubernetes/configmaps/*-config-local.yaml
+*.kubeconfig
+
+# Minikube and kubectl
+.minikube/
+kubectl-debug-*
+
+# Jenkins local files
+jenkins/secrets/
+jenkins/workspace/
+jenkins/.jenkins/
+
+# PlantUML output files
+plantuml/*.png
+plantuml/*.svg
+plantuml/*.pdf
+
+# Monitoring data and configs
+monitoring/data/
+monitoring/logs/
+grafana/data/
+prometheus/data/
+alertmanager/data/
+
+# Database dumps and backups
+database/dumps/
+database/backups/
+*.sql.gz
+*.dump
+
+# SSL certificates and keys
+*.crt
+*.key
+*.pem
+*.p12
+*.jks
+
+# Scripts output and temp files
+scripts/temp/
+scripts/logs/
+scripts/*.tmp
+
+# Local development overrides
+docker-compose.local.yml
+kubernetes/local/
+.env.override
+
+# Package manager lockfiles (keep package-lock.json but ignore others)
+yarn.lock
+pnpm-lock.yaml
+
+# Runtime and cache directories
+.cache/
+.tmp/
+runtime/
+
+# OS and tool specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Cloud provider configs (sensitive)
+.aws/
+.gcp/
+.azure/
+cloudflare-tunnel-credentials.json
+
+# Performance and profiling
+*.prof
+*.trace
+*.heap

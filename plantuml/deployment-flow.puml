@@ -1,0 +1,51 @@
+@startuml deployment-flow
+title DevOps Blog - Deployment Flow
+
+!define RECTANGLE class
+skinparam backgroundColor #FAFAFA
+
+actor Developer
+participant "Git Repository" as git
+participant "Jenkins Pipeline" as jenkins
+participant "Docker Registry" as registry
+participant "Kubernetes Cluster" as k8s
+participant "Monitoring Stack" as monitoring
+
+== Development Phase ==
+Developer -> git : Push code changes
+git -> jenkins : Webhook trigger
+
+== CI/CD Pipeline ==
+jenkins -> jenkins : Checkout code
+jenkins -> jenkins : Run tests
+jenkins -> jenkins : Security scan
+jenkins -> jenkins : Build Docker images
+
+alt Build successful
+    jenkins -> registry : Push frontend image
+    jenkins -> registry : Push backend image
+    
+    == Deployment Phase ==
+    jenkins -> k8s : Apply Kubernetes manifests
+    k8s -> k8s : Rolling update deployment
+    
+    == Health Checks ==
+    k8s -> k8s : Readiness probes
+    k8s -> k8s : Liveness probes
+    
+    == Monitoring Setup ==
+    k8s -> monitoring : Deploy Prometheus
+    k8s -> monitoring : Deploy Grafana
+    monitoring -> k8s : Scrape metrics
+    
+    jenkins -> Developer : Deployment success notification
+    
+else Build failed
+    jenkins -> Developer : Build failure notification
+end
+
+== Post-Deployment ==
+monitoring -> monitoring : Collect metrics
+monitoring -> Developer : Alert on issues (if any)
+
+@enduml

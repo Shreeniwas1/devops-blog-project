@@ -1,0 +1,144 @@
+@startuml database-design
+title Database Architecture & Design
+
+skinparam backgroundColor #FAFAFA
+
+package "Database Layer" {
+    
+    package "PostgreSQL Instance" {
+        class "Primary Database" as primary_db
+        class "Connection Pool" as conn_pool
+        class "Query Cache" as query_cache
+    }
+    
+    package "Schema Design" {
+        class Posts {
+            +id : SERIAL
+            +title : VARCHAR(255)
+            +content : TEXT
+            +excerpt : TEXT
+            +author : VARCHAR(100)
+            +tags : VARCHAR(255)
+            +slug : VARCHAR(255)
+            +published : BOOLEAN
+            +created_at : TIMESTAMP
+            +updated_at : TIMESTAMP
+        }
+
+        class Users {
+            +id : SERIAL
+            +username : VARCHAR(50)
+            +email : VARCHAR(255)
+            +password_hash : VARCHAR(255)
+            +role : VARCHAR(20)
+            +created_at : TIMESTAMP
+            +last_login : TIMESTAMP
+        }
+
+        class Comments {
+            +id : SERIAL
+            +post_id : INTEGER
+            +user_id : INTEGER
+            +content : TEXT
+            +created_at : TIMESTAMP
+            +updated_at : TIMESTAMP
+        }
+
+        Posts "1" -- "0..*" Comments : has
+        Users "1" -- "0..*" Comments : writes
+        Users "1" -- "0..*" Posts : authors
+    }
+}
+
+package "Data Access Layer" {
+    class "Database Config" as db_config
+    class "Connection Manager" as conn_mgr
+    class "Query Builder" as query_builder
+    class "Migration Scripts" as migrations
+}
+
+package "Backup & Recovery" {
+    class "Automated Backups" as backups
+    class "Point-in-time Recovery" as pitr
+    class "Backup Verification" as backup_verify
+}
+
+package "Application Interface" {
+    class "Backend API" as backend
+    class "Database Service" as db_service
+    class "Health Checks" as health
+}
+
+package "Kubernetes Storage" {
+    class "Persistent Volume" as pv
+    class "Persistent Volume Claim" as pvc
+    class "Storage Class" as storage_class
+}
+
+package "Monitoring" {
+    class "Database Metrics" as db_metrics
+    class "Connection Monitoring" as conn_monitor
+    class "Performance Metrics" as perf_metrics
+}
+
+' Interactions and dependencies (represented with arrows)
+backend --> db_service : SQL queries
+db_service --> conn_mgr : Connect DB
+conn_mgr --> conn_pool : Get pooled connection
+conn_pool --> primary_db : Execute query
+
+db_config --> conn_mgr
+migrations --> primary_db
+query_builder --> primary_db
+
+primary_db --> pvc
+pvc --> pv
+storage_class --> pv
+
+primary_db --> db_metrics
+conn_pool --> conn_monitor
+health --> primary_db
+db_metrics --> perf_metrics
+
+primary_db --> backups
+backups --> backup_verify
+backups --> pitr
+
+query_cache --> primary_db : Cached queries
+primary_db --> query_cache : Popular queries
+
+note right of conn_pool
+Connection Pool:
+- Min: 5, Max: 20
+- Idle timeout: 30s
+- Retry: 3 attempts
+- Health check: 60s
+end note
+
+note right of primary_db
+PostgreSQL 15:
+- UTF-8
+- Auto-vacuum
+- WAL logs
+- SSL-enabled
+- Timezone: UTC
+end note
+
+note right of Posts
+Indexes:
+- PRIMARY KEY (id)
+- UNIQUE (slug)
+- INDEX (created_at DESC)
+- GIN (tags)
+- FULL TEXT (title, content)
+end note
+
+note right of backups
+Backup Strategy:
+- Daily full, hourly incremental
+- 7-day retention
+- Cross-region replication
+- Auto test verification
+end note
+
+@enduml
