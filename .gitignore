@@ -109,6 +109,8 @@ dist/
 # Minikube binary (large file)
 minikube-linux-amd64
 minikube-*
+minikube
+kubectl
 
 # Kubernetes secrets (never commit real secrets)
 kubernetes/secrets/prod-secrets.yaml
@@ -211,6 +213,9 @@ kubernetes/configmaps/*-config-local.yaml
 # Minikube and kubectl
 .minikube/
 kubectl-debug-*
+*.kubeconfig
+kubeconfig
+kubeconfig.*
 
 # Jenkins local files
 jenkins/secrets/
